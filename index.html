@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Kandimusic</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #f4ede0; }
+  canvas { display: block; touch-action: none; }
+  #overlay {
+    position: fixed; inset: 0; background: #1a1510;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    cursor: pointer; z-index: 100; transition: opacity 0.8s;
+  }
+  #overlay-title {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-weight: 200; font-size: clamp(24px, 5vw, 48px);
+    letter-spacing: 0.45em; text-transform: uppercase; color: #f0e8d8;
+    margin-bottom: 16px;
+  }
+  #overlay-sub {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase;
+    color: rgba(240,232,216,0.4);
+  }
+  #overlay-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #c8362a; margin: 28px auto 0;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 0.3; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.5); }
+  }
+  #label {
+    position: fixed; top: 20px; left: 24px;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase;
+    color: rgba(40,30,20,0.3); pointer-events: none;
+  }
+  #hint {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: rgba(40,30,20,0.3); pointer-events: none; transition: opacity 2s;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div id="label">Kandimusic</div>
+<div id="hint">Tap · Hold · Drag</div>
+
+<div id="overlay">
+  <div id="overlay-title">Kandimusic</div>
+  <div id="overlay-sub">An interactive sound painting</div>
+  <div id="overlay-dot"></div>
+</div>
+
+<script src="https://unpkg.com/tone@14/build/Tone.js"></script>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const C = {
+  cream:'#f4ede0', black:'#1c1814', purple:'#7040a8',
+  red:'#c8362a', blue:'#2a58b0', yellow:'#e8c832',
+  orange:'#c86820', teal:'#387878', gold:'#a07030',
+  gray:'#8a8880', skyblue:'#8ab0cc', olive:'#687838', brown:'#7a5030',
+};
+
+const SCALE = ['C3','E3','G3','A3','C4','D4','E4','G4','A4','C5','E5','G5'];
+
+function sn(i) { return SCALE[i % SCALE.length]; }
+
+function buildShapes() {
+  return [
+    // Concentric circles top-left
+    {id:'cc1', type:'circle', cx:.115, cy:.21, r:.115, fill:C.purple, stroke:C.black, sw:3, snd:'pad', idx:0},
+    {id:'cc2', type:'circle', cx:.115, cy:.21, r:.082, fill:C.black, stroke:null, snd:'pad', idx:1},
+    {id:'cc3', type:'circle', cx:.115, cy:.21, r:.046, fill:C.purple, stroke:null, snd:'pluck', idx:4},
+    // Red orb
+    {id:'red', type:'circle', cx:.085, cy:.375, r:.078, fill:C.red, stroke:null, snd:'pad', idx:2},
+    // Yellow circle bottom-left
+    {id:'yel', type:'circle', cx:.125, cy:.788, r:.072, fill:C.yellow, stroke:'#444', sw:2, snd:'pluck', idx:3},
+    // Blue circle center-low
+    {id:'blu', type:'circle', cx:.37, cy:.83, r:.064, fill:C.blue, stroke:'#222', sw:2, snd:'pluck', idx:5},
+    // Gray circle bottom-right
+    {id:'gry', type:'circle', cx:.808, cy:.862, r:.072, fill:C.gray, stroke:'#444', sw:1.5, snd:'pluck', idx:6},
+    // Gold circle overlapping gray
+    {id:'gld', type:'circle', cx:.738, cy:.818, r:.045, fill:C.gold, stroke:'#333', sw:1.5, snd:'pluck', idx:7},
+    // Outlined circle center
+    {id:'wht', type:'circle', cx:.325, cy:.298, r:.057, fill:'rgba(255,255,255,0.03)', stroke:'#333', sw:2, snd:'pluck', idx:8},
+    // Small blue circle upper right
+    {id:'bsm', type:'circle', cx:.635, cy:.185, r:.025, fill:C.blue, stroke:'#222', sw:1.5, snd:'pluck', idx:9},
+    // Concentric right
+    {id:'cr1', type:'circle', cx:.782, cy:.485, r:.065, fill:'none', stroke:'#666', sw:1.5, snd:'pluck', idx:10},
+    {id:'cr2', type:'circle', cx:.782, cy:.485, r:.04,  fill:'none', stroke:'#777', sw:1.2, snd:'pluck', idx:11},
+    {id:'cr3', type:'circle', cx:.782, cy:.485, r:.018, fill:C.blue, stroke:null, snd:'pluck', idx:0},
+    // Small dots
+    {id:'d1', type:'dot', cx:.482, cy:.172, r:.011, fill:C.red, snd:'pluck', idx:0},
+    {id:'d2', type:'dot', cx:.592, cy:.615, r:.008, fill:C.red, snd:'pluck', idx:1},
+    {id:'d3', type:'dot', cx:.558, cy:.655, r:.007, fill:C.red, snd:'pluck', idx:3},
+    {id:'d4', type:'dot', cx:.505, cy:.56,  r:.005, fill:'#444', snd:'pluck', idx:4},
+    // Diagonal lines
+    {id:'l1', type:'line', x1:.595,y1:.01, x2:.912,y2:.98, stroke:C.black, sw:2.5, snd:'sus', idx:0},
+    {id:'l2', type:'line', x1:.225,y1:.035,x2:.782,y2:.965,stroke:C.black, sw:1.5, snd:'sus', idx:1},
+    {id:'l3', type:'line', x1:.725,y1:.015,x2:.275,y2:.885,stroke:C.black, sw:1.2, snd:'sus', idx:2},
+    {id:'l4', type:'line', x1:.04, y1:.445,x2:.96, y2:.555,stroke:C.black, sw:1.0, snd:'sus', idx:3},
+    {id:'lr', type:'line', x1:.545,y1:.055,x2:.695,y2:.832,stroke:C.red,   sw:3.5, snd:'sus', idx:4},
+    {id:'l5', type:'line', x1:.385,y1:.068,x2:.145,y2:.755,stroke:'#555',  sw:1.0, snd:'sus', idx:5},
+    {id:'l6', type:'line', x1:.445,y1:.925,x2:.965,y2:.285,stroke:C.black, sw:1.0, snd:'sus', idx:6},
+    // Triangles
+    {id:'tri1', type:'tri', pts:[[.38,.08],[.56,.38],[.20,.38]], fill:'rgba(138,176,204,0.35)', stroke:'rgba(100,140,170,0.5)', sw:1.2, snd:'pad', idx:3},
+    {id:'tri2', type:'tri', pts:[[.648,.095],[.688,.172],[.608,.172]], fill:C.yellow, stroke:'#444', sw:1, snd:'pluck', idx:5},
+    {id:'tri3', type:'tri', pts:[[.855,.698],[.925,.888],[.785,.888]], fill:C.gold, stroke:'#444', sw:1.5, snd:'pluck', idx:7},
+    // Rects
+    {id:'r1', type:'rect', x:.862,y:.075,w:.038,h:.032, fill:C.black, snd:'pad', idx:0},
+    {id:'r2', type:'rect', x:.915,y:.558,w:.028,h:.020, fill:C.red, snd:'pad', idx:4},
+    {id:'r3', type:'rect', x:.425,y:.905,w:.042,h:.042, fill:C.blue, snd:'pad', idx:5},
+    {id:'r4', type:'rect', x:.582,y:.322,w:.085,h:.055, fill:'rgba(192,120,152,0.55)', snd:'pad', idx:9},
+    // Checker band
+    {id:'chk', type:'checker', x:.215,y:.395,w:.105,h:.235,
+     colors:[C.black,'#888',C.olive,C.brown,'#668899','#445566'], snd:'pad', idx:0},
+    // Arcs
+    {id:'arc1', type:'arc', cx:.378,cy:.548,r:.185, sa:-0.25,ea:Math.PI*0.72, stroke:C.black, sw:5.5, snd:'sus', idx:0},
+    {id:'arc2', type:'arc', cx:.558,cy:.718,r:.058, sa:-Math.PI*.52,ea:Math.PI*.52, stroke:C.orange, sw:2, snd:'sus', idx:3},
+    {id:'arc3', type:'arc', cx:.198,cy:.618,r:.062, sa:Math.PI*.78,ea:Math.PI*1.82, stroke:C.black, sw:4, snd:'sus', idx:2},
+  ].map(s => ({...s, _t:0, _long:false, _wave:0, _wph:0}));
+}
+
+let shapes = buildShapes();
+
+// Audio
+let ready = false;
+let pluckS, susS, padS, revB, dlyB;
+
+async function startAudio() {
+  await Tone.start();
+  revB  = new Tone.Reverb({decay:3.5, wet:0.35}).toDestination();
+  dlyB  = new Tone.PingPongDelay({delayTime:'8n.',feedback:0.25,wet:0.18}).connect(revB);
+  pluckS = new Tone.PluckSynth({attackNoise:2, dampening:3800, resonance:0.97}).connect(dlyB);
+  susS   = new Tone.Synth({oscillator:{type:'sine'},envelope:{attack:0.2,decay:0,sustain:1,release:1.2},volume:-10}).connect(revB);
+  padS   = new Tone.PolySynth(Tone.Synth,{oscillator:{type:'triangle8'},envelope:{attack:0.5,decay:0.4,sustain:0.65,release:2},volume:-16}).connect(revB);
+  ready = true;
+}
+
+let therOn = false;
+
+function doClick(s) {
+  if (!ready) return;
+  if (s.snd==='pluck') { pluckS.triggerAttackRelease(sn(s.idx),'8n'); }
+  else if (s.snd==='sus') { susS.triggerAttackRelease(sn(s.idx),'4n'); }
+  else { padS.triggerAttackRelease([sn(s.idx),sn(s.idx+2),sn(s.idx+4)],'2n'); }
+}
+
+function doLongStart(s) {
+  if (!ready) return;
+  if (s.snd==='pad') { padS.triggerAttack([sn(s.idx),sn(s.idx+2),sn(s.idx+4)]); }
+  else if (s.snd==='sus') { susS.triggerAttack(sn(s.idx)); therOn=true; }
+  else { [0,4,7].forEach((v,i)=>setTimeout(()=>{ if(s._long) pluckS.triggerAttackRelease(sn(s.idx+v),'8n'); },i*180)); }
+}
+
+function doLongEnd(s) {
+  if (!ready) return;
+  if (s.snd==='pad') { try{padS.triggerRelease([sn(s.idx),sn(s.idx+2),sn(s.idx+4)]);}catch(e){} }
+  if (therOn) { susS.triggerRelease(); therOn=false; }
+}
+
+function doDrag(py) {
+  if (!ready) return;
+  const freq = 80 + (1-py/H)*1000;
+  if (!therOn) { susS.triggerAttack(freq); therOn=true; }
+  else { susS.frequency.rampTo(freq, 0.07); }
+}
+
+function doDragEnd() {
+  if (therOn && ready) { susS.triggerRelease(); therOn=false; }
+}
+
+// Ripples & trails
+let ripples=[], trails=[], curTrail=null;
+
+function addRipple(x,y,color) {
+  ripples.push({x,y,r:4,maxR:Math.min(W,H)*.14,a:.8,color});
+}
+
+function shapeColor(s) {
+  if (s.fill && s.fill!=='none' && !s.fill.startsWith('rgba(255')) return s.fill;
+  return s.stroke||'#aaa';
+}
+
+// Hit detection
+function hit(s,px,py) {
+  const x=px/W, y=py/H, P=0.018;
+  switch(s.type) {
+    case 'circle': case 'dot': {
+      const dx=x-s.cx, dy=y-s.cy, rn=s.r+P;
+      return dx*dx+dy*dy<=rn*rn;
+    }
+    case 'line': {
+      const {x1,y1,x2,y2}=s, l2=(x2-x1)**2+(y2-y1)**2;
+      if(!l2) return false;
+      const t=Math.max(0,Math.min(1,((x-x1)*(x2-x1)+(y-y1)*(y2-y1))/l2));
+      const dx=x-(x1+t*(x2-x1)), dy=y-(y1+t*(y2-y1));
+      return Math.sqrt(dx*dx+dy*dy)<P*1.8;
+    }
+    case 'tri': {
+      const [a,b,c]=s.pts;
+      const s1=(px/W-b[0])*(a[1]-b[1])-(a[0]-b[0])*(py/H-b[1]);
+      const s2=(px/W-c[0])*(b[1]-c[1])-(b[0]-c[0])*(py/H-c[1]);
+      const s3=(px/W-a[0])*(c[1]-a[1])-(c[0]-a[0])*(py/H-a[1]);
+      return !((s1<0||s2<0||s3<0)&&(s1>0||s2>0||s3>0));
+    }
+    case 'rect': case 'checker':
+      return x>=s.x-P&&x<=s.x+s.w+P&&y>=s.y-P&&y<=s.y+s.h+P;
+    case 'arc': {
+      const dx=x-s.cx, dy=y-s.cy, d=Math.sqrt(dx*dx+dy*dy);
+      if(Math.abs(d-s.r)>P*2.5) return false;
+      let a=Math.atan2(dy,dx);
+      return a>=s.sa-0.3&&a<=s.ea+0.3;
+    }
+  }
+  return false;
+}
+
+function findShape(px,py) {
+  for(let i=shapes.length-1;i>=0;i--) if(hit(shapes[i],px,py)) return shapes[i];
+  return null;
+}
+
+// Input
+let pdown=false, dragOrig=null, isDrag=false, activeS=null, longTimer=null, longS=null;
+
+function getPos(e) {
+  if(e.touches&&e.touches.length) return {x:e.touches[0].clientX,y:e.touches[0].clientY};
+  return {x:e.clientX,y:e.clientY};
+}
+
+function onDown(e) {
+  e.preventDefault();
+  const p=getPos(e);
+  pdown=true; dragOrig=p; isDrag=false;
+  activeS=findShape(p.x,p.y);
+  clearTimeout(longTimer);
+  if(activeS) {
+    longTimer=setTimeout(()=>{
+      if(!isDrag&&activeS){longS=activeS;activeS._long=true;doLongStart(activeS);}
+    },380);
+  }
+}
+
+function onMove(e) {
+  e.preventDefault();
+  if(!pdown) return;
+  const p=getPos(e);
+  const dx=p.x-dragOrig.x, dy=p.y-dragOrig.y;
+  if(Math.sqrt(dx*dx+dy*dy)>8) {
+    if(!isDrag){clearTimeout(longTimer);isDrag=true;}
+    if(activeS) {
+      if(activeS.type==='line'||activeS.type==='arc'){activeS._wave=1;activeS._wph+=0.4;}
+      if(!curTrail){curTrail={pts:[],a:0.55,color:shapeColor(activeS),alive:true};trails.push(curTrail);}
+      if(curTrail.pts.length>50) curTrail.pts.shift();
+      curTrail.pts.push({x:p.x,y:p.y});
+      doDrag(p.y);
+    }
+  }
+}
+
+function onUp(e) {
+  e.preventDefault();
+  clearTimeout(longTimer);
+  const p=getPos(e)||dragOrig;
+  pdown=false;
+  if(!isDrag&&activeS){activeS._t=performance.now();addRipple(p.x,p.y,shapeColor(activeS));doClick(activeS);}
+  if(longS){doLongEnd(longS);longS._long=false;longS=null;}
+  if(isDrag&&activeS){activeS._drag=false;doDragEnd();}
+  if(curTrail){curTrail.alive=false;curTrail=null;}
+  isDrag=false;activeS=null;
+}
+
+canvas.addEventListener('mousedown',onDown);
+canvas.addEventListener('mousemove',onMove);
+canvas.addEventListener('mouseup',onUp);
+canvas.addEventListener('touchstart',onDown,{passive:false});
+canvas.addEventListener('touchmove',onMove,{passive:false});
+canvas.addEventListener('touchend',onUp,{passive:false});
+
+// Draw
+let ts=0;
+
+function clickScale(s) {
+  const e=performance.now()-s._t;
+  if(e>450) return 1;
+  return 1+0.18*Math.sin((e/450)*Math.PI);
+}
+
+function drawBg() {
+  ctx.fillStyle=C.cream; ctx.fillRect(0,0,W,H);
+  const g=ctx.createRadialGradient(W*.5,H*.42,0,W*.5,H*.42,Math.max(W,H)*.6);
+  g.addColorStop(0,'rgba(255,252,244,0.5)');
+  g.addColorStop(1,'rgba(228,218,195,0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+function drawCircle(s) {
+  const cx=s.cx*W, cy=s.cy*H, r=s.r*Math.min(W,H);
+  const sc=clickScale(s);
+  ctx.save();
+  if(s._long){ctx.translate(cx,cy);ctx.rotate(ts*1.8);ctx.translate(-cx,-cy);}
+  if(sc!==1){ctx.translate(cx,cy);ctx.scale(sc,sc);ctx.translate(-cx,-cy);}
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+  if(s.fill&&s.fill!=='none'){ctx.fillStyle=s.fill;ctx.fill();}
+  if(s.stroke&&s.stroke!=='none'){ctx.strokeStyle=s.stroke;ctx.lineWidth=s.sw||1.5;ctx.stroke();}
+  ctx.restore();
+}
+
+function drawLine(s) {
+  const x1=s.x1*W,y1=s.y1*H,x2=s.x2*W,y2=s.y2*H;
+  ctx.save();
+  ctx.strokeStyle=s.stroke; ctx.lineWidth=s.sw; ctx.lineCap='round';
+  if(s._wave>0.01) {
+    const dx=x2-x1,dy=y2-y1,len=Math.sqrt(dx*dx+dy*dy);
+    const nx=-dy/len,ny=dx/len;
+    ctx.beginPath();
+    for(let i=0;i<=50;i++){
+      const t=i/50,lx=x1+dx*t,ly=y1+dy*t;
+      const wv=s._wave*20*Math.sin(t*Math.PI)*Math.sin(t*12+s._wph);
+      i===0?ctx.moveTo(lx+nx*wv,ly+ny*wv):ctx.lineTo(lx+nx*wv,ly+ny*wv);
+    }
+    ctx.stroke(); s._wave*=0.92;
+  } else {
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawTri(s) {
+  const [a,b,c]=s.pts;
+  const cx=((a[0]+b[0]+c[0])/3)*W, cy=((a[1]+b[1]+c[1])/3)*H;
+  const sc=clickScale(s);
+  ctx.save();
+  if(sc!==1){ctx.translate(cx,cy);ctx.scale(sc,sc);ctx.translate(-cx,-cy);}
+  ctx.beginPath();
+  ctx.moveTo(a[0]*W,a[1]*H);ctx.lineTo(b[0]*W,b[1]*H);ctx.lineTo(c[0]*W,c[1]*H);
+  ctx.closePath();
+  if(s.fill&&s.fill!=='none'){ctx.fillStyle=s.fill;ctx.fill();}
+  if(s.stroke&&s.stroke!=='none'){ctx.strokeStyle=s.stroke;ctx.lineWidth=s.sw;ctx.stroke();}
+  ctx.restore();
+}
+
+function drawRect(s) {
+  const x=s.x*W,y=s.y*H,w=s.w*W,h=s.h*H;
+  const cx=x+w/2,cy=y+h/2,sc=clickScale(s);
+  ctx.save();
+  if(sc!==1){ctx.translate(cx,cy);ctx.scale(sc,sc);ctx.translate(-cx,-cy);}
+  ctx.beginPath();ctx.rect(x,y,w,h);
+  if(s.fill&&s.fill!=='none'){ctx.fillStyle=s.fill;ctx.fill();}
+  if(s.stroke&&s.stroke!=='none'){ctx.strokeStyle=s.stroke;ctx.lineWidth=s.sw||1;ctx.stroke();}
+  ctx.restore();
+}
+
+function drawChecker(s) {
+  const x=s.x*W,y=s.y*H,w=s.w*W,h=s.h*H;
+  ctx.save();
+  ctx.transform(1,0,-0.18,1,y*0.18,0);
+  const rows=8,cols=4,cw=w/cols,ch=h/rows;
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    ctx.fillStyle=s.colors[(r+c)%s.colors.length];
+    ctx.fillRect(x+c*cw,y+r*ch,cw,ch);
+  }
+  ctx.restore();
+}
+
+function drawArc(s) {
+  const cx=s.cx*W,cy=s.cy*H,r=s.r*Math.min(W,H);
+  ctx.save();
+  ctx.strokeStyle=s.stroke;ctx.lineWidth=s.sw;ctx.lineCap='round';
+  if(s._long){ctx.translate(cx,cy);ctx.rotate(ts*1.2);ctx.translate(-cx,-cy);}
+  if(s._wave>0.01){
+    ctx.beginPath();
+    for(let i=0;i<=60;i++){
+      const ang=s.sa+(s.ea-s.sa)*(i/60),t=i/60;
+      const wv=s._wave*14*Math.sin(t*Math.PI)*Math.sin(t*10+s._wph);
+      const rr=r+wv,lx=cx+Math.cos(ang)*rr,ly=cy+Math.sin(ang)*rr;
+      i===0?ctx.moveTo(lx,ly):ctx.lineTo(lx,ly);
+    }
+    ctx.stroke(); s._wave*=0.92;
+  } else {
+    ctx.beginPath();ctx.arc(cx,cy,r,s.sa,s.ea);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawRipples() {
+  ripples=ripples.filter(r=>r.a>0.01);
+  for(const r of ripples){
+    ctx.save();
+    ctx.globalAlpha=r.a*0.6;ctx.strokeStyle=r.color;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=r.a*0.25;
+    ctx.beginPath();ctx.arc(r.x,r.y,r.r*.6,0,Math.PI*2);ctx.stroke();
+    ctx.restore();
+    r.r+=(r.maxR-r.r)*.09+1.2;r.a*=0.88;
+  }
+}
+
+function drawTrails() {
+  trails=trails.filter(t=>t.a>0.005);
+  for(const t of trails){
+    if(t.pts.length<2) continue;
+    ctx.save();
+    ctx.globalAlpha=t.a*0.45;ctx.strokeStyle=t.color;
+    ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.beginPath();ctx.moveTo(t.pts[0].x,t.pts[0].y);
+    for(let i=1;i<t.pts.length;i++) ctx.lineTo(t.pts[i].x,t.pts[i].y);
+    ctx.stroke();ctx.restore();
+    if(!t.alive) t.a*=0.92;
+  }
+}
+
+function loop(t) {
+  ts=t/1000;
+  ctx.clearRect(0,0,W,H);
+  drawBg(); drawTrails();
+  for(const s of shapes){
+    switch(s.type){
+      case 'circle': case 'dot': drawCircle(s); break;
+      case 'line':   drawLine(s); break;
+      case 'tri':    drawTri(s); break;
+      case 'rect':   drawRect(s); break;
+      case 'checker':drawChecker(s); break;
+      case 'arc':    drawArc(s); break;
+    }
+  }
+  drawRipples();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+document.getElementById('overlay').addEventListener('click', async ()=>{
+  await startAudio();
+  const ov=document.getElementById('overlay');
+  ov.style.opacity='0';
+  setTimeout(()=>ov.style.display='none',800);
+  setTimeout(()=>document.getElementById('hint').style.opacity='0',5000);
+});
+</script>
+</body>
+</html>
